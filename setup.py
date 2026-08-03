@@ -1,8 +1,26 @@
+import os
+import re
+
 import enums
 from aws_login import login_to_aws
 from cli import mara, utils, workspace
 
-EMBEDDINGS_VOLUME = 'nanome-ai-deployer_mara-embeddings-volume'
+
+def _compose_project_name():
+    """Replicate docker compose's default project name — the deploy folder's
+    name lowercased with invalid characters stripped — honoring a
+    ``COMPOSE_PROJECT_NAME`` override in the root .env, so generated volume
+    names match the ones compose actually creates.
+    """
+    compose_env = utils.read_env_file(enums.COMPOSE_ENV_FILE)
+    name = compose_env.get('COMPOSE_PROJECT_NAME') or os.path.basename(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+    return re.sub(r'[^a-z0-9_-]', '', name.lower()).lstrip('_-')
+
+
+COMPOSE_PROJECT_NAME = _compose_project_name()
+EMBEDDINGS_VOLUME = f'{COMPOSE_PROJECT_NAME}_mara-embeddings-volume'
 
 # Compose profiles gating each service group in the compose files. nginx-proxy
 # carries no profile so it always runs; `local-embeddings` additionally gates
@@ -146,7 +164,7 @@ def setup_mara(host, cert_type, workspace_api_url=None):
     existing_tool_server_env = utils.read_env_file(enums.TOOL_SERVER_ENV_FILE)
     tool_server_env = mara.configure_tool_server(existing_tool_server_env)
     tool_server_env.update(
-        FILES_VOLUME='nanome-ai-deployer_mara-tool-volume',
+        FILES_VOLUME=f'{COMPOSE_PROJECT_NAME}_mara-tool-volume',
         VIRTUAL_HOST=tool_server_host,
     )
     if cert_type == 'Default':

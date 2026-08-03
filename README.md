@@ -1,9 +1,10 @@
-# Nanome AI Deployment Scripts
+# Nanome Deployment Scripts
+
+View latest deployment instructions at [nanome.ai/deploy](https://nanome.ai/deploy)
 
 ## Infrastructure
 
-- MARA server (Ubuntu)
-- Photon Server (Windows)
+- Nanome server (Ubuntu or Linux)
 
 ## Deployment
 
@@ -15,8 +16,8 @@ Log in to the server via SSH and run the following commands
 ```sh
 sudo apt-get update
 sudo apt install -y git python3 python3-venv
-git clone https://github.com/nanome-ai/nanome-ai-deployer
-cd nanome-ai-deployer
+git clone https://github.com/nanome-ai/nanome-deployer
+cd nanome-deployer
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -26,7 +27,7 @@ sudo reboot
 
 After reboot
 ```sh
-cd nanome-ai-deployer
+cd nanome-deployer
 source venv/bin/activate
 python setup.py
 docker compose up -d --wait
@@ -47,7 +48,7 @@ prompt to run `docker compose down --remove-orphans` before starting again.
 ### Update / Redeploy
 
 ```sh
-cd nanome-ai-deployer
+cd nanome-deployer
 python aws_login.py
 docker compose up -d --wait
 ```
@@ -62,8 +63,8 @@ docker compose up -d --wait
 
 2) Clone this repository
    ```sh
-   git clone https://github.com/nanome-ai/nanome-ai-deployer
-   cd nanome-ai-deployer
+   git clone https://github.com/nanome-ai/nanome-deployer
+   cd nanome-deployer
    ```
 
 3) Set up Python and pip
@@ -85,7 +86,7 @@ docker compose up -d --wait
 
 6) Reactivate virtualenv
    ```sh
-   cd nanome-ai-deployer
+   cd nanome-deployer
    source venv/bin/activate
    ```
 
@@ -121,20 +122,3 @@ docker compose up -d --wait
   docker compose logs workspace-api
   ```
   Also verify that the URL in your `.env.workspaces` file is correct.
-
-## Configuring Windows Server
-
-This Repo contains a Powershell script `configure_windows.ps1` for downloading and installing Photon on the Windows Server
-
-1) Connect to your Windows server via RDP
-
-2) Copy `configure_windows.ps1` onto the Desktop of your Windows Server. This is currently a manual process, you may have to create a new file, and copy contents directly.
-
-3) In Powershell, run the script. It will ask you for the AWS credentials provided to you by Nanome
-
-   ```sh
-   cd Desktop
-   ./configure_windows.ps1
-   ```
-
-4) Once the script has completed, open the Photon Control Panel, and start service. (To be documented later)
