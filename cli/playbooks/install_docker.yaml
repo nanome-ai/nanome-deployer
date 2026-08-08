@@ -62,6 +62,51 @@
         - docker_installed.rc != 0
         - ansible_os_family == "RedHat"
 
+    - name: Make sure /etc/docker exists
+      file:
+        path: /etc/docker
+        state: directory
+
+    - name: Configure Docker log rotation
+      copy:
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "50m",
+              "max-file": "3"
+            }
+          }
+        dest: /etc/docker/daemon.json
+        mode: '0644'
+      register: docker_daemon_config
+
+    - name: Restart Docker to apply log rotation
+      service:
+        name: docker
+        state: restarted
+      when: docker_daemon_config.changed
+
+    - name: Make journald drop-in directory
+      file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+
+    - name: Limit systemd journal size
+      copy:
+        content: |
+          [Journal]
+          SystemMaxUse=1G
+        dest: /etc/systemd/journald.conf.d/00-size.conf
+        mode: '0644'
+      register: journald_config
+
+    - name: Restart journald to apply size limit
+      service:
+        name: systemd-journald
+        state: restarted
+      when: journald_config.changed
+
     - name: Start Docker service
       service:
         name: docker
