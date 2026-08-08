@@ -34,6 +34,13 @@ PROVIDER_ENV_KEYS = (
     'AZURE_TOKEN_SCOPE',
 )
 
+# Keys owned by the GitHub tool import prompts, cleared and rebuilt the same
+# way as PROVIDER_ENV_KEYS.
+GITHUB_ENV_KEYS = (
+    'GITHUB_TOKEN',
+    'GITHUB_BASE_URL',
+)
+
 
 def configure_tool_server(existing_env=None) -> dict:
     env = existing_env or {}
@@ -347,12 +354,58 @@ def _collect_llm_api_key(existing_mara_env) -> str:
     )
 
 
+def configure_github_envvars(mara_env) -> dict:
+    """Optional settings for importing custom tools from GitHub repos.
+
+    The feature works with no configuration: public repos are analyzed
+    unauthenticated and users connect personal tokens for private repos.
+    A server-wide token raises the public-repo API rate limit from 60 to
+    5000 req/hr; the base URL only changes for GitHub Enterprise Server.
+    """
+    existing_token = mara_env.get('GITHUB_TOKEN') or ''
+    existing_base = mara_env.get('GITHUB_BASE_URL') or ''
+    already_configured = bool(existing_token or existing_base)
+
+    choice = ask_selection(
+        'MARA can import custom tools from GitHub repositories. This works out '
+        'of the box;\noptional settings raise API rate limits and add GitHub '
+        'Enterprise Server support.\nConfigure them?',
+        ['No (defaults: github.com, no server token)', 'Yes'],
+        default=2 if already_configured else 1,
+    )
+    if choice == '1':
+        return {}
+
+    env = {}
+    base_url = _prompt_with_default(
+        'GITHUB_BASE_URL (GitHub Enterprise Server: https://<host>/api/v3)',
+        existing_base,
+        default='https://api.github.com',
+    )
+    if base_url and base_url != 'https://api.github.com':
+        env['GITHUB_BASE_URL'] = base_url
+
+    token = _prompt_with_default(
+        'GITHUB_TOKEN (optional, ENTER to skip — server-wide token for '
+        'public-repo analysis; a no-scope PAT is enough)',
+        existing_token,
+        is_secret=True,
+    )
+    if token:
+        env['GITHUB_TOKEN'] = token
+
+    return env
+
+
 def configure_mara_server(existing_mara_env) -> dict:
     # Strip every provider-related key from the existing env. The function
     # rebuilds them based on the user's current selections; leaving stale keys
     # in (e.g. LLM_API_KEY when switching to service_principal, or AZURE_* when
     # switching to Anthropic) silently breaks runtime config.
-    base_env = {k: v for k, v in existing_mara_env.items() if k not in PROVIDER_ENV_KEYS}
+    base_env = {
+        k: v for k, v in existing_mara_env.items()
+        if k not in PROVIDER_ENV_KEYS + GITHUB_ENV_KEYS
+    }
     env = dict(base_env)
 
     # Detect prior provider for the default selection
@@ -375,6 +428,8 @@ def configure_mara_server(existing_mara_env) -> dict:
     )
     if enable_ai == '2':
         env['LLM_API_KEY'] = ''
+        # GitHub tool import is independent of AI chat features
+        env.update(configure_github_envvars(existing_mara_env))
         return env
 
     llm_provider = ask_selection(
@@ -403,4 +458,5 @@ def configure_mara_server(existing_mara_env) -> dict:
         if provider_env.get('AZURE_AUTH_MODE') == 'api_key':
             env['LLM_API_KEY'] = _collect_llm_api_key(config_env)
 
+    env.update(configure_github_envvars(existing_mara_env))
     return env

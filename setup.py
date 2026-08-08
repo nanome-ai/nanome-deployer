@@ -180,7 +180,6 @@ def setup_mara(host, cert_type, workspace_api_url=None):
     else:
         tool_server_env.pop('CERT_NAME', None)
         tool_server_env.pop('REQUESTS_CA_BUNDLE', None)
-    utils.write_env_file(enums.TOOL_SERVER_ENV_FILE, tool_server_env)
 
     # Configure the mara .env file
     tool_server_api_key = tool_server_env.get('API_KEY', None)
@@ -217,6 +216,14 @@ def setup_mara(host, cert_type, workspace_api_url=None):
         mara_env.pop('CERT_NAME', None)
         mara_env.pop('REQUESTS_CA_BUNDLE', None)
 
+    # The tool server downloads repo tarballs from the same GitHub host when
+    # building images for tools imported from GitHub.
+    if mara_env.get('GITHUB_BASE_URL'):
+        tool_server_env['GITHUB_BASE_URL'] = mara_env['GITHUB_BASE_URL']
+    else:
+        tool_server_env.pop('GITHUB_BASE_URL', None)
+
+    utils.write_env_file(enums.TOOL_SERVER_ENV_FILE, tool_server_env)
     utils.write_env_file(enums.MARA_ENV_FILE, mara_env)
     return mara_env, tool_server_env
 
