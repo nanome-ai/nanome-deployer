@@ -131,14 +131,19 @@ def _warn_if_embedding_model_changed(old, new):
     )
 
 
-def setup_workspaces(host, cert_type):
-    """Configure the workspaces service group: Workspace API and auth proxy."""
+def setup_workspaces(host, cert_type, mara_url=None):
+    """Configure the workspaces service group: Workspace API and auth proxy.
+
+    ``mara_url`` is only set when the web group is part of the same deployment.
+    """
     workspaces_env = workspace.configure_workspace_api()
     workspaces_env['VIRTUAL_HOST'] = f'workspaces.{host}'
     if cert_type == 'Default':
         workspaces_env['CERT_NAME'] = 'default'
     elif cert_type == 'Individual':
         workspaces_env['CERT_NAME'] = 'workspaces'
+    if mara_url:
+        workspaces_env['MARA_URL'] = mara_url
     utils.write_env_file(enums.WORKSPACES_ENV_FILE, workspaces_env)
 
     nanome_auth_env = {'VIRTUAL_HOST': f'nanome-auth.{host}'}
@@ -258,7 +263,10 @@ def setup_nanome_ai():
     mara_env = None
 
     if WORKSPACES_PROFILE in profiles:
-        workspaces_env, nanome_auth_env = setup_workspaces(host, cert_type)
+        mara_url = (
+            f'{protocol}://nanome.{host}' if WEB_PROFILE in profiles else None
+        )
+        workspaces_env, nanome_auth_env = setup_workspaces(host, cert_type, mara_url)
         service_urls += [
             ('Workspace API', workspaces_env['VIRTUAL_HOST']),
             ('Nanome Auth Proxy', nanome_auth_env['VIRTUAL_HOST']),
