@@ -96,6 +96,12 @@ docker compose up -d --wait
     docker compose up -d --wait
     ```
 
+### Customization
+
+- **Hostnames**: `setup.py` asks for the hostname of each service (default `nanome.<domain>`, `nanome-tools.<domain>`, ...). Later runs keep the values you set. For individual TLS certificates, name each file after the first label of its hostname (e.g. `mara.crt`/`mara.key` for `mara.example.com`).
+- **Corporate CA**: if your network needs extra CA certificates (e.g. SSL inspection), give the PEM file when `setup.py` asks. It is copied to `certs/ca.pem` and added to `certs/bundle.pem`, which services use through `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE`.
+- **Compose overrides**: put other changes in `docker-compose.override.yaml` (see `docker-compose.override.example.yaml`). `docker compose` loads it automatically, and git ignores it, so `git pull` keeps it.
+
 ### Troubleshooting
 
 - **"An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity operation" during setup**
@@ -114,7 +120,7 @@ docker compose up -d --wait
   ```
 
 - **MARA returns a "certificate verify failed" error when running some tools like Download from RCSB**
-  Your network may be using SSL introspection, which interferes with outbound requests. Contact your IT team to request an exemption, or reach out to Nanome support for a list of domains that need to be whitelisted (e.g. rcsb.org).
+  Your network may be using SSL introspection, which interferes with outbound requests. Re-run `python setup.py` and give your corporate CA certificate when asked (see Customization). Alternatively, ask your IT team for an exemption, or contact Nanome support for a list of domains to allowlist (e.g. rcsb.org).
 
 - **Web UI shows "Failed to fetch" or you cannot create a workspace**
   The Workspace API service may not be running. Check its logs for errors:

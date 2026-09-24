@@ -1,0 +1,15 @@
+# Copy to docker-compose.override.yaml to use.
+# Example: use the host CA bundle instead of the copy that setup.py makes.
+services:
+  mara-ai:
+    volumes:
+      - /etc/ssl/ca-bundle.pem:/etc/ssl/ca-bundle.pem:ro
+    environment:
+      - SSL_CERT_FILE=/etc/ssl/ca-bundle.pem
+      - REQUESTS_CA_BUNDLE=/etc/ssl/ca-bundle.pem
+  mara-tool-server:
+    volumes:
+      - /etc/ssl/ca-bundle.pem:/etc/ssl/ca-bundle.pem:ro
+    environment:
+      - SSL_CERT_FILE=/etc/ssl/ca-bundle.pem
+      - REQUESTS_CA_BUNDLE=/etc/ssl/ca-bundle.pem

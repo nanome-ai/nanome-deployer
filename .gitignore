@@ -10,3 +10,5 @@ tool_server_api_key.txt
 venv
 .env*
 *.sh
+docker-compose.override.yaml
+docker-compose.override.yml

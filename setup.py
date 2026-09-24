@@ -48,6 +48,14 @@ SERVICE_DESCRIPTIONS = {
 }
 
 
+SERVICE_HOSTS = {
+    'mara': ('Web UI', enums.MARA_ENV_FILE, 'nanome'),
+    'tools': ('Tool Server', enums.TOOL_SERVER_ENV_FILE, 'nanome-tools'),
+    'workspaces': ('Workspace API', enums.WORKSPACES_ENV_FILE, 'workspaces'),
+    'auth': ('Nanome Auth Proxy', enums.AUTH_PROXY_ENV_FILE, 'nanome-auth'),
+}
+
+
 def _read_compose_profiles():
     compose_env = utils.read_env_file(enums.COMPOSE_ENV_FILE)
     return {p for p in compose_env.get('COMPOSE_PROFILES', '').split(',') if p}
@@ -66,12 +74,32 @@ def _default_mode(old_profiles):
 
 def _default_host():
     """Prefill the host from whichever env file a previous run left behind."""
-    mara_env = utils.read_env_file(enums.MARA_ENV_FILE)
-    host = utils.extract_host_from_env(mara_env, 'nanome')
-    if host:
-        return host
-    workspaces_env = utils.read_env_file(enums.WORKSPACES_ENV_FILE)
-    return utils.extract_host_from_env(workspaces_env, 'workspaces')
+    for env_file in (enums.MARA_ENV_FILE, enums.WORKSPACES_ENV_FILE):
+        virtual_host = utils.read_env_file(env_file).get('VIRTUAL_HOST', '')
+        host = utils.base_domain(virtual_host)
+        if host:
+            return host
+    return None
+
+
+def _gather_hostnames(host, profiles):
+    """Ask for the hostname of each service. Default to the previous run's
+    hostname when it is on the same domain, else to ``<prefix>.<host>``.
+    """
+    keys = []
+    if WEB_PROFILE in profiles:
+        keys += ['mara', 'tools']
+    if WORKSPACES_PROFILE in profiles:
+        keys += ['workspaces', 'auth']
+
+    print('\n\nHostnames for each service (press ENTER to accept the default):')
+    hostnames = {}
+    for key in keys:
+        label, env_file, prefix = SERVICE_HOSTS[key]
+        existing = utils.read_env_file(env_file).get('VIRTUAL_HOST', '')
+        default = existing if utils.base_domain(existing) == host else f'{prefix}.{host}'
+        hostnames[key] = input(f'{label} [{default}]: ').strip() or default
+    return hostnames
 
 
 def _write_compose_env(profiles, mara_env=None):
@@ -131,41 +159,45 @@ def _warn_if_embedding_model_changed(old, new):
     )
 
 
-def setup_workspaces(host, cert_type, mara_url=None):
+def setup_workspaces(hostnames, cert_type, mara_url=None):
     """Configure the workspaces service group: Workspace API and auth proxy.
 
     ``mara_url`` is only set when the web group is part of the same deployment.
     """
     workspaces_env = workspace.configure_workspace_api()
-    workspaces_env['VIRTUAL_HOST'] = f'workspaces.{host}'
+    workspaces_env['VIRTUAL_HOST'] = hostnames['workspaces']
     if cert_type == 'Default':
         workspaces_env['CERT_NAME'] = 'default'
     elif cert_type == 'Individual':
-        workspaces_env['CERT_NAME'] = 'workspaces'
+        workspaces_env['CERT_NAME'] = utils.cert_name(hostnames['workspaces'])
     if mara_url:
         workspaces_env['MARA_URL'] = mara_url
     utils.write_env_file(enums.WORKSPACES_ENV_FILE, workspaces_env)
 
-    nanome_auth_env = {'VIRTUAL_HOST': f'nanome-auth.{host}'}
+    nanome_auth_env = {'VIRTUAL_HOST': hostnames['auth']}
     if cert_type == 'Default':
         nanome_auth_env['CERT_NAME'] = 'default'
     elif cert_type == 'Individual':
-        nanome_auth_env['CERT_NAME'] = 'nanome-auth'
+        nanome_auth_env['CERT_NAME'] = utils.cert_name(hostnames['auth'])
     utils.write_env_file(enums.AUTH_PROXY_ENV_FILE, nanome_auth_env)
 
     return workspaces_env, nanome_auth_env
 
 
-def setup_mara(host, cert_type, workspace_api_url=None):
+def setup_mara(hostnames, cert_type, use_ca_bundle, workspace_api_url=None):
     """Configure the web service group: MARA, tool server, and embeddings.
 
     ``workspace_api_url`` is only set when the workspaces group is part of the
     same deployment; otherwise any stale value is removed from the env.
     """
     protocol = 'http' if cert_type == 'None' else 'https'
+    ca_bundle_env = {
+        'REQUESTS_CA_BUNDLE': '/certs/bundle.pem',
+        'SSL_CERT_FILE': '/certs/bundle.pem',
+    }
 
     # Setup tool-server .env file
-    tool_server_host = f'nanome-tools.{host}'
+    tool_server_host = hostnames['tools']
     existing_tool_server_env = utils.read_env_file(enums.TOOL_SERVER_ENV_FILE)
     tool_server_env = mara.configure_tool_server(existing_tool_server_env)
     tool_server_env.update(
@@ -173,22 +205,15 @@ def setup_mara(host, cert_type, workspace_api_url=None):
         VIRTUAL_HOST=tool_server_host,
     )
     if cert_type == 'Default':
-        tool_server_env.update(
-            CERT_NAME='default',
-            REQUESTS_CA_BUNDLE='/certs/bundle.pem',
-        )
+        tool_server_env['CERT_NAME'] = 'default'
     elif cert_type == 'Individual':
-        tool_server_env.update(
-            CERT_NAME='nanome-tools',
-            REQUESTS_CA_BUNDLE='/certs/bundle.pem',
-        )
+        tool_server_env['CERT_NAME'] = utils.cert_name(tool_server_host)
     else:
         tool_server_env.pop('CERT_NAME', None)
-        tool_server_env.pop('REQUESTS_CA_BUNDLE', None)
 
     # Configure the mara .env file
     tool_server_api_key = tool_server_env.get('API_KEY', None)
-    mara_host = f'nanome.{host}'
+    mara_host = hostnames['mara']
     existing_mara_env = utils.read_env_file(enums.MARA_ENV_FILE)
     mara_env = mara.configure_mara_server(existing_mara_env)
 
@@ -208,18 +233,18 @@ def setup_mara(host, cert_type, workspace_api_url=None):
     else:
         mara_env.pop('WORKSPACE_API_URL', None)
     if cert_type == 'Default':
-        mara_env.update(
-            CERT_NAME='default',
-            REQUESTS_CA_BUNDLE='/certs/bundle.pem',
-        )
+        mara_env['CERT_NAME'] = 'default'
     elif cert_type == 'Individual':
-        mara_env.update(
-            CERT_NAME='nanome',
-            REQUESTS_CA_BUNDLE='/certs/bundle.pem',
-        )
+        mara_env['CERT_NAME'] = utils.cert_name(mara_host)
     else:
         mara_env.pop('CERT_NAME', None)
-        mara_env.pop('REQUESTS_CA_BUNDLE', None)
+
+    for env in (tool_server_env, mara_env):
+        if use_ca_bundle:
+            env.update(ca_bundle_env)
+        else:
+            for key in ca_bundle_env:
+                env.pop(key, None)
 
     # The tool server downloads repo tarballs from the same GitHub host when
     # building images for tools imported from GitHub.
@@ -256,17 +281,30 @@ def setup_nanome_ai():
     input('Press ENTER to continue')
 
     host = utils.gather_host_info(default=_default_host())
-    cert_type = utils.gather_https_info(host)
+    hostnames = _gather_hostnames(host, profiles)
+    cert_hostnames = [hostnames[k] for k in ('mara', 'tools', 'workspaces') if k in hostnames]
+    cert_type = utils.gather_https_info(host, cert_hostnames)
     protocol = 'http' if cert_type == 'None' else 'https'
+
+    # Services trust our own TLS certs and any extra CA via ./certs/bundle.pem
+    use_extra_ca = utils.gather_ca_info()
+    bundle_files = [utils.CA_FILE] if use_extra_ca else []
+    if cert_type == 'Default':
+        bundle_files.append('./certs/default.crt')
+    elif cert_type == 'Individual':
+        bundle_files += [f'./certs/{utils.cert_name(h)}.crt' for h in cert_hostnames]
+    use_ca_bundle = bool(bundle_files)
+    if use_ca_bundle:
+        utils.write_ca_bundle(bundle_files)
 
     service_urls = []
     mara_env = None
 
     if WORKSPACES_PROFILE in profiles:
         mara_url = (
-            f'{protocol}://nanome.{host}' if WEB_PROFILE in profiles else None
+            f'{protocol}://{hostnames["mara"]}' if WEB_PROFILE in profiles else None
         )
-        workspaces_env, nanome_auth_env = setup_workspaces(host, cert_type, mara_url)
+        workspaces_env, nanome_auth_env = setup_workspaces(hostnames, cert_type, mara_url)
         service_urls += [
             ('Workspace API', workspaces_env['VIRTUAL_HOST']),
             ('Nanome Auth Proxy', nanome_auth_env['VIRTUAL_HOST']),
@@ -274,11 +312,13 @@ def setup_nanome_ai():
 
     if WEB_PROFILE in profiles:
         workspace_api_url = (
-            f'{protocol}://workspaces.{host}'
+            f'{protocol}://{hostnames["workspaces"]}'
             if WORKSPACES_PROFILE in profiles
             else None
         )
-        mara_env, tool_server_env = setup_mara(host, cert_type, workspace_api_url)
+        mara_env, tool_server_env = setup_mara(
+            hostnames, cert_type, use_ca_bundle, workspace_api_url
+        )
         service_urls = [
             ('Web UI', mara_env['VIRTUAL_HOST']),
             ('Tool Server', tool_server_env['VIRTUAL_HOST']),

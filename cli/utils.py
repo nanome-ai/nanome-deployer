@@ -113,16 +113,14 @@ def ask_selection(question, options, default=None):
     return selection if selection != '' else str(default)
 
 
-def extract_host_from_env(env_dict, prefix):
-    """Extract the base host from a VIRTUAL_HOST value by stripping a known prefix.
+def base_domain(hostname):
+    """Strip the service label, e.g. 'nanome.company.com' -> 'company.com'."""
+    return hostname.split('.', 1)[1] if '.' in hostname else None
 
-    e.g. VIRTUAL_HOST='nanome.company.com' with prefix='nanome' -> 'company.com'
-    """
-    virtual_host = env_dict.get('VIRTUAL_HOST', '')
-    expected_prefix = f'{prefix}.'
-    if virtual_host.startswith(expected_prefix):
-        return virtual_host[len(expected_prefix):]
-    return None
+
+def cert_name(hostname):
+    """Individual cert files are named after the hostname's first label."""
+    return hostname.split('.', 1)[0]
 
 
 def gather_host_info(default=None):
@@ -165,19 +163,25 @@ def has_default_certs(path, enforce=False):
     return check_certs(path, 'default', enforce=enforce)
 
 
-def has_individual_certs(path, enforce=False):
-    has_certs = True
-    for name in ['nanome', 'nanome-tools', 'workspaces']:
-        if not check_certs(path, name, enforce=enforce):
-            has_certs = False
-            break
-    return has_certs
+def has_individual_certs(path, names, enforce=False):
+    return all(check_certs(path, name, enforce=enforce) for name in names)
 
 
-def gather_https_info(host):
+def _copy_file(src, dest):
+    with open(src, 'rb') as src_file, open(dest, 'wb') as dest_file:
+        dest_file.write(src_file.read())
+
+
+def gather_https_info(host, hostnames):
+    """Ask for TLS certs and copy them to ./certs.
+
+    ``hostnames`` are the service hosts that need individual certs.
+    Returns 'Default', 'Individual', or 'None'.
+    """
+    cert_names = [cert_name(h) for h in hostnames]
     use_existing = None
     has_default = has_default_certs('./certs')
-    has_individual = has_individual_certs('./certs')
+    has_individual = has_individual_certs('./certs', cert_names)
     if has_default or has_individual:
         use_existing = ask_selection(
             "Found existing TLS certificates in ./certs\n"
@@ -195,59 +199,85 @@ def gather_https_info(host):
         if https_input != '1':
             return 'None'
 
+    while use_existing != '1':
+        individual_lines = ''.join(
+            f"  {cert_name(h)}.crt/{cert_name(h)}.key covering {h}\n" for h in hostnames
+        )
+        certs_path = input(
+            "\n\nEnter path containing either:\n"
+            f"  default.crt/default.key covering *.{host}\n"
+            "or\n"
+            + individual_lines
+            + "\nEnter path: "
+        )
+
+        has_default = has_default_certs(certs_path)
+        has_individual = has_individual_certs(certs_path, cert_names)
+        if not (has_default or has_individual):
+            print("Could not find valid certificates in the provided path. Please try again.")
+            continue
+
+        os.makedirs('./certs', exist_ok=True)
+        names = ['default'] if has_default else cert_names
+        for name in names:
+            check_certs(certs_path, name, enforce=True)
+            for ext in ['crt', 'key']:
+                _copy_file(os.path.join(certs_path, f'{name}.{ext}'), f'./certs/{name}.{ext}')
+        print(f"Copied {'default' if has_default else 'individual'} certificates to ./certs.")
+        break
+
+    return 'Default' if has_default else 'Individual'
+
+
+CA_FILE = './certs/ca.pem'
+CA_BUNDLE_FILE = './certs/bundle.pem'
+
+
+def gather_ca_info():
+    """Ask for extra CA certs to trust, e.g. a corporate CA for SSL inspection.
+
+    Keeps a copy in ./certs/ca.pem so later runs keep it by default.
+    Returns True if extra CA certs are in use.
+    """
+    has_existing = os.path.exists(CA_FILE)
+    use_ca = ask_selection(
+        "Does your network require trusting additional CA certificates?\n"
+        "(e.g. a corporate CA, or SSL inspection of outbound traffic)",
+        ['Yes', 'No'],
+        default=1 if has_existing else 2,
+    )
+    if use_ca != '1':
+        if has_existing:
+            os.remove(CA_FILE)
+        return False
+
     while True:
-        if use_existing != '1':
-            certs_path = input(
-                "\n\nEnter path containing either:\n"
-                f"  default.crt/default.key covering *.{host}\n"
-                "or\n"
-                f"  nanome.crt/nanome.key covering nanome.{host}\n"
-                f"  nanome-tools.crt/nanome-tools.key covering nanome-tools.{host}\n"
-                f"  workspaces.crt/workspaces.key covering workspaces.{host}\n"
-                "\nEnter path: "
-            )
-
-            has_default = has_default_certs(certs_path)
-            has_individual = has_individual_certs(certs_path)
-            if not (has_default or has_individual):
-                print("Could not find valid certificates in the provided path. Please try again.")
+        hint = ' [keep existing]' if has_existing else ''
+        ca_path = input(f"\nEnter path to CA certificate(s) PEM file{hint}: ")
+        if not ca_path and has_existing:
+            return True
+        if not os.path.isfile(ca_path):
+            print("File not found. Please try again.")
+            continue
+        with open(ca_path, 'r') as f:
+            if '-----BEGIN CERTIFICATE-----' not in f.read():
+                print("File must contain PEM certificates. Please try again.")
                 continue
+        os.makedirs('./certs', exist_ok=True)
+        _copy_file(ca_path, CA_FILE)
+        print(f"Copied CA certificates to {CA_FILE}.")
+        return True
 
-            # copy certs to ./certs
-            os.makedirs('./certs', exist_ok=True)
-            if has_default:
-                check_certs(certs_path, 'default', enforce=True)
-                with open(os.path.join(certs_path, 'default.crt'), 'rb') as src_cert:
-                    with open('./certs/default.crt', 'wb') as dest_cert:
-                        dest_cert.write(src_cert.read())
-                with open(os.path.join(certs_path, 'default.key'), 'rb') as src_key:
-                    with open('./certs/default.key', 'wb') as dest_key:
-                        dest_key.write(src_key.read())
-                print("Copied default certificates to ./certs.")
-            elif has_individual:
-                for name in ['nanome', 'nanome-tools', 'workspaces']:
-                    check_certs(certs_path, name, enforce=True)
-                    with open(os.path.join(certs_path, f'{name}.crt'), 'rb') as src_cert:
-                        with open(f'./certs/{name}.crt', 'wb') as dest_cert:
-                            dest_cert.write(src_cert.read())
-                    with open(os.path.join(certs_path, f'{name}.key'), 'rb') as src_key:
-                        with open(f'./certs/{name}.key', 'wb') as dest_key:
-                            dest_key.write(src_key.read())
-                print("Copied individual certificates to ./certs.")
 
-        # create a bundle.pem file for requests
-        with open('./certs/bundle.pem', 'w') as bundle_file:
-            with open(certifi.where(), 'r') as ca_file:
-                bundle_file.write(ca_file.read())
-            if has_default:
-                with open('./certs/default.crt', 'r') as cert_file:
-                    bundle_file.write(cert_file.read())
-            elif has_individual:
-                for name in ['nanome', 'nanome-tools', 'workspaces']:
-                    with open(f'./certs/{name}.crt', 'r') as cert_file:
-                        bundle_file.write(cert_file.read())
+def write_ca_bundle(cert_files):
+    """Write ./certs/bundle.pem: public CAs + extra CA + our TLS certs.
 
-        return 'Default' if has_default else 'Individual'
+    Services use it to trust our own hosts and the corporate CA.
+    """
+    with open(CA_BUNDLE_FILE, 'w') as bundle_file:
+        for path in [certifi.where(), *cert_files]:
+            with open(path, 'r') as f:
+                bundle_file.write(f.read().rstrip('\n') + '\n')
 
 
 def create_inventory_file(inventory_file, mara_host_config):
