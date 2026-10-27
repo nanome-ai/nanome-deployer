@@ -111,7 +111,7 @@ def configure_openai_envvars(mara_env) -> dict:
     )
     tiers = _prompt_model_tiers(
         mara_env,
-        defaults=('gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4-mini'),
+        defaults=('gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6-luna'),
     )
     return {'LLM_API_URL': llm_api_url, **tiers}
 
@@ -129,9 +129,9 @@ def configure_anthropic_envvars(mara_env) -> dict:
     env: dict = _prompt_model_tiers(
         mara_env,
         defaults=(
-            'claude-opus-4-7',
-            'claude-sonnet-4-6',
-            'claude-haiku-4-5',
+            'claude-opus-5-5',
+            'claude-sonnet-5-5',
+            'claude-haiku-5-5',
         ),
         provider_prefix='anthropic',
     )
@@ -207,9 +207,9 @@ def configure_bedrock_envvars(mara_env) -> dict:
     tiers = _prompt_model_tiers(
         mara_env,
         defaults=(
-            'global.anthropic.claude-opus-4-7',
-            'global.anthropic.claude-sonnet-4-6',
-            'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+            'global.anthropic.claude-opus-5-5',
+            'global.anthropic.claude-sonnet-5-5',
+            'global.anthropic.claude-haiku-5-5',
         ),
         provider_prefix='bedrock',
     )
@@ -265,13 +265,13 @@ def configure_azure_envvars(mara_env) -> dict:
     )
     tiers = _prompt_model_tiers(
         mara_env,
-        defaults=('gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-mini'),
+        defaults=('gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6-luna'),
         label_prefix=' (Azure deployment name)',
     )
     azure_llm_api_version = _prompt_with_default(
         'AZURE_LLM_API_VERSION',
         mara_env.get('AZURE_LLM_API_VERSION'),
-        default='2024-08-01-preview',
+        default='2025-04-01-preview',
     )
     azure_embedding_api_version = _prompt_with_default(
         'AZURE_EMBEDDING_API_VERSION',
